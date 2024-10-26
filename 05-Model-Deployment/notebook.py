@@ -1,111 +1,83 @@
-#!/usr/bin/env python
-# coding: utf-8
-
-# In[40]:
-
-
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+import pickle
+import random
+import logging
 
-from sklearn.model_selection import train_test_split
-from sklearn.model_selection import KFold
-
+from sklearn.model_selection import train_test_split, KFold
 from sklearn.feature_extraction import DictVectorizer
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import roc_auc_score
 
-get_ipython().run_line_magic('matplotlib', 'inline')
+# Configure logging
+logging.basicConfig(level=logging.INFO,
+                    format='%(asctime)s - %(levelname)s - %(message)s')
 
+# Constants
+C = 1.0
+n_splits = 5
+output_file = f'model_C={C}.bin'
 
-# In[42]:
+logging.info("Script started")
 
-
+# Load data
+logging.info("Loading data from CSV")
 df = pd.read_csv('data_week_3.csv')
+df.columns = df.columns.str.lower().str.replace(' ', '_')
 
-df.columns = df.columns.str.lower().str.replace(' ','_')
+# Preprocess data
+logging.info("Preprocessing data")
+categorical_columns = list(df.dtypes[df.dtypes == 'object'].index)
+for col in categorical_columns:
+    df[col] = df[col].str.lower().str.replace(' ', '_')
 
-categorical_columns =list(df.dtypes[df.dtypes == 'object'].index)
-
-for c in categorical_columns:
-    df[c] = df[c].str.lower().str.replace(' ', '_')
-
-df.totalcharges = pd.to_numeric(df.totalcharges, errors='coerce')
-df.totalcharges = df.totalcharges.fillna(0)
-
+df.totalcharges = pd.to_numeric(df.totalcharges, errors='coerce').fillna(0)
 df.churn = (df.churn == 'yes').astype(int)
 
-
-# In[43]:
-
-
+# Split data
+logging.info("Splitting data into training and test sets")
 df_full_train, df_test = train_test_split(df, test_size=0.2, random_state=1)
 
-
-# In[46]:
-
-
+# Define feature columns
 numerical = ['tenure', 'monthlycharges', 'totalcharges']
-
 categorical = [
-    'gender',
-    'seniorcitizen',
-    'partner',
-    'dependents',
-    'phoneservice',
-    'multiplelines',
-    'internetservice',
-    'onlinesecurity',
-    'onlinebackup',
-    'deviceprotection',
-    'techsupport',
-    'streamingtv',
-    'streamingmovies',
-    'contract',
-    'paperlessbilling',
-    'paymentmethod',
+    'gender', 'seniorcitizen', 'partner', 'dependents', 'phoneservice',
+    'multiplelines', 'internetservice', 'onlinesecurity', 'onlinebackup',
+    'deviceprotection', 'techsupport', 'streamingtv', 'streamingmovies',
+    'contract', 'paperlessbilling', 'paymentmethod'
 ]
 
-
-# In[48]:
+# Training function
 
 
 def train(df_train, y_train, C=1.0):
+    logging.info("Training model")
     dicts = df_train[categorical + numerical].to_dict(orient='records')
-
     dv = DictVectorizer(sparse=False)
     X_train = dv.fit_transform(dicts)
 
-    model = LogisticRegression(C=C,solver='liblinear',max_iter=1000)
+    model = LogisticRegression(C=C, solver='liblinear', max_iter=1000)
     model.fit(X_train, y_train)
-    
+    logging.info("Model trained successfully")
+
     return dv, model
 
-
-# In[50]:
+# Prediction function
 
 
 def predict(df, dv, model):
+    logging.info("Predicting probabilities for data")
     dicts = df[categorical + numerical].to_dict(orient='records')
-
     X = dv.transform(dicts)
     y_pred = model.predict_proba(X)[:, 1]
 
     return y_pred
 
 
-# In[52]:
-
-
-C = 1.0
-n_splits = 5
-
-
-# In[54]:
-
-
+# Cross-validation
+logging.info("Starting cross-validation")
 kfold = KFold(n_splits=n_splits, shuffle=True, random_state=1)
-
 scores = []
 
 for train_idx, val_idx in kfold.split(df_full_train):
@@ -120,140 +92,38 @@ for train_idx, val_idx in kfold.split(df_full_train):
 
     auc = roc_auc_score(y_val, y_pred)
     scores.append(auc)
+    logging.info(f'Fold AUC: {auc:.3f}')
 
-print('C=%s %.3f +- %.3f' % (C, np.mean(scores), np.std(scores)))
+logging.info(f'C={C} Mean AUC: {np.mean(scores):.3f} +- {np.std(scores):.3f}')
 
-
-# In[56]:
-
-
-scores
-
-
-# In[58]:
-
-
-dv, model = train(df_full_train, df_full_train.churn.values, C=1.0)
+# Train final model
+logging.info("Training final model on full training set")
+dv, model = train(df_full_train, df_full_train.churn.values, C=C)
 y_pred = predict(df_test, dv, model)
 
+# Evaluate final model
 y_test = df_test.churn.values
 auc = roc_auc_score(y_test, y_pred)
-auc
+logging.info(f'Final model AUC: {auc:.3f}')
 
+# Save the model
+logging.info(f"Saving model to {output_file}")
+with open(output_file, 'wb') as f_out:
+    pickle.dump((dv, model), f_out)
+logging.info("Model saved successfully")
 
-# ## Save Model
-
-# In[23]:
-
-
-import pickle
-
-
-# In[24]:
-
-
-output_file = f'model_C={C}.bin'
-output_file
-
-
-# In[25]:
-
-
-with open(model_file,'wb') as f_out:
-    pickle.dump((dv,model),f_out)
-
-
-# ## load model
-# - for better results, restart kernel at this section
-
-# In[12]:
-
-
-import pickle
-
-
-# In[14]:
-
-
-model_file_name = 'model_C=1.0.bin'
-
-
-# In[16]:
-
-
-with open(model_file_name,'rb') as f_in:
+# Load the model
+logging.info(f"Loading model from {output_file}")
+with open(output_file, 'rb') as f_in:
     dv, model = pickle.load(f_in)
 
-
-# In[18]:
-
-
-dv
-
-
-# In[20]:
-
-
-model
-
-
-# In[78]:
-
-
-import random
-
-
-# In[80]:
-
-
-customer = df_full_train.iloc[random.randint(0,100)].to_dict()
-customer
-
-
-# In[84]:
-
-
+# Test model with a random customer
+logging.info("Testing model with a random customer")
+customer = df_full_train.iloc[random.randint(
+    0, len(df_full_train) - 1)].to_dict()
+logging.info(f"Found customer data {customer}")
 X_customer = dv.transform([customer])
 
-
-# In[88]:
-
-
-model.predict_proba(X_customer)[0,1]
-
-
-# In[ ]:
-
-
-
-
-
-# In[ ]:
-
-
-
-
-
-# In[ ]:
-
-
-
-
-
-# In[ ]:
-
-
-
-
-
-# In[ ]:
-
-
-
-
-
-# In[ ]:
-
-
-
-
+churn_prob = model.predict_proba(X_customer)[0, 1]
+logging.info(f'Customer churn probability: {churn_prob:.3f}')
+print(f'Customer churn probability: {churn_prob:.3f}')
