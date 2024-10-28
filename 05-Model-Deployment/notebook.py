@@ -112,18 +112,4 @@ with open(output_file, 'wb') as f_out:
     pickle.dump((dv, model), f_out)
 logging.info("Model saved successfully")
 
-# Load the model
-logging.info(f"Loading model from {output_file}")
-with open(output_file, 'rb') as f_in:
-    dv, model = pickle.load(f_in)
 
-# Test model with a random customer
-logging.info("Testing model with a random customer")
-customer = df_full_train.iloc[random.randint(
-    0, len(df_full_train) - 1)].to_dict()
-logging.info(f"Found customer data {customer}")
-X_customer = dv.transform([customer])
-
-churn_prob = model.predict_proba(X_customer)[0, 1]
-logging.info(f'Customer churn probability: {churn_prob:.3f}')
-print(f'Customer churn probability: {churn_prob:.3f}')
